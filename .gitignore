@@ -1,0 +1,68 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# environment / secrets
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+
+# supabase — local CLI artifacts only (migrations/ stays tracked)
+supabase/.branches
+supabase/.temp
+supabase/.env
+supabase/.env.*
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# opennext / cloudflare workers build output
+/.open-next/
+.wrangler/
+
+# production
+/build
+/dist
+
+# vercel
+.vercel
+
+# debug / logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.log
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# IDE / editor
+.cursor/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# misc
+*.pem
