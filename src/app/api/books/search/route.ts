@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from "next/server"
+import type { NextRequest } from "next/server"
 
 export interface GoogleBookResult {
   google_books_id: string
@@ -29,7 +29,7 @@ function normalizeCover(url?: string) {
 export async function GET(request: NextRequest) {
   const q = request.nextUrl.searchParams.get("q")?.trim()
   if (!q) {
-    return NextResponse.json({ results: [] satisfies GoogleBookResult[] })
+    return Response.json({ results: [] satisfies GoogleBookResult[] })
   }
 
   const url = new URL("https://www.googleapis.com/books/v1/volumes")
@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
     const res = await fetch(url, { next: { revalidate: 3600 } })
     if (!res.ok) {
       if (res.status === 429) {
-        return NextResponse.json(
+        return Response.json(
           {
             error:
               "O limite diário da busca foi atingido. Configure uma chave da Google Books API ou tente novamente mais tarde.",
@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
       }
 
       if (res.status === 400 || res.status === 403) {
-        return NextResponse.json(
+        return Response.json(
           {
             error:
               "A Google Books API recusou a busca. Verifique se a API está ativa e se GOOGLE_BOOKS_API_KEY é válida.",
@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
         )
       }
 
-      return NextResponse.json(
+      return Response.json(
         { error: "A Google Books API está indisponível no momento." },
         { status: 502 }
       )
@@ -85,9 +85,9 @@ export async function GET(request: NextRequest) {
         total_pages: item.volumeInfo!.pageCount ?? null,
       }))
 
-    return NextResponse.json({ results })
+    return Response.json({ results })
   } catch {
-    return NextResponse.json(
+    return Response.json(
       { error: "Falha ao conectar ao Google Books." },
       { status: 502 }
     )

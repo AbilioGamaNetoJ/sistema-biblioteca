@@ -1,5 +1,9 @@
 import { createServerClient } from "@supabase/ssr"
-import { NextResponse, type NextRequest } from "next/server"
+// Import the narrow implementation to keep Next's image-generation runtime
+// out of the Cloudflare proxy bundle. The public next/server barrel also
+// exports ImageResponse, which pulls in Satori and Resvg WASM.
+import { NextResponse } from "next/dist/server/web/spec-extension/response"
+import type { NextRequest } from "next/server"
 
 const PUBLIC_PATHS = ["/login", "/cadastro"]
 
