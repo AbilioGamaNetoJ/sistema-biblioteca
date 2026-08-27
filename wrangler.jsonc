@@ -1,8 +1,28 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
+  // Workers Builds (Cloudflare dashboard):
+  //   Build command:  npx opennextjs-cloudflare build
+  //   Deploy command: npx opennextjs-cloudflare deploy -- --keep-vars
+  // --keep-vars keeps dashboard Secrets (Supabase, Google Books) across deploys.
+  // Do not use `npx wrangler deploy` as the deploy command — Wrangler will
+  // call `opennextjs-cloudflare deploy` without generating .open-next/.
   "name": "sistema-biblioteca",
   "main": ".open-next/worker.js",
   "compatibility_date": "2026-08-01",
-  "compatibility_flags": ["nodejs_compat"],
-  "comment_vars": "As variáveis NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY são embutidas no build (arquivo .env / .env.production) e não precisam ser configuradas no Workers."
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  // Keep NEXT_PUBLIC_SUPABASE_* and GOOGLE_BOOKS_API_KEY as dashboard Secrets.
+  // Workers Builds also needs them as Build variables (no .env.local in CI).
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "sistema-biblioteca"
+    }
+  ]
 }

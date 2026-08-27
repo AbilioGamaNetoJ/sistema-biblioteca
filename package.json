@@ -7,13 +7,16 @@
   ],
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node scripts/debug-cf-open-next.mjs prebuild",
     "build": "next build",
+    "postbuild": "node scripts/debug-cf-open-next.mjs postbuild",
     "start": "next start",
     "lint": "eslint",
     "icons": "node scripts/generate-icons.mjs",
-    "build:worker": "opennextjs-cloudflare build",
+    "build:worker": "node scripts/debug-cf-open-next.mjs pre-worker && opennextjs-cloudflare build && node scripts/debug-cf-open-next.mjs post-worker",
     "preview": "opennextjs-cloudflare preview",
-    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy"
+    "deploy": "node scripts/debug-cf-open-next.mjs pre-deploy && opennextjs-cloudflare build && opennextjs-cloudflare deploy -- --keep-vars",
+    "upload": "node scripts/debug-cf-open-next.mjs pre-upload && opennextjs-cloudflare build && opennextjs-cloudflare upload -- --keep-vars"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

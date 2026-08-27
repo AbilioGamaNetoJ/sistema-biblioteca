@@ -38,13 +38,17 @@ cp .env.example .env.local
 # preencha as variáveis do Supabase e GOOGLE_BOOKS_API_KEY
 ```
 
-> As variáveis `NEXT_PUBLIC_*` são embutidas no build — não é necessário
-> configurá-las no Cloudflare.
+No Cloudflare, cadastre como **Secrets** (Workers → Settings → Variables and Secrets):
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `GOOGLE_BOOKS_API_KEY`
+
+Se o deploy for pelo Git (Workers Builds), coloque as mesmas em **Build variables and secrets**. Sem `--keep-vars`, o próximo deploy apaga Variables do painel (Secrets não).
 
 Para habilitar a busca de livros, ative a **Google Books API** no Google Cloud
 Console, crie uma chave em **APIs e serviços → Credenciais** e informe-a em
-`GOOGLE_BOOKS_API_KEY`. Em produção, configure essa variável como secret do
-ambiente de deploy.
+`GOOGLE_BOOKS_API_KEY`.
 
 ### 3. Desenvolvimento
 
@@ -75,9 +79,12 @@ bunx wrangler login
 bun run deploy
 ```
 
-Recomenda-se também `wrangler.toml` → defina um `account_id` (opcional) para
-evitar ambiguidade de conta. O build (Next + OpenNext) embute as variáveis do
-`.env.local`/`.env.production` no bundle.
+O script `bun run deploy` usa `--keep-vars` para não apagar as Secrets do
+painel. No Workers Builds, o **Deploy command** deve ser:
+
+```bash
+npx opennextjs-cloudflare deploy -- --keep-vars
+```
 
 ## Funcionalidades
 
