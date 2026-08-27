@@ -1,10 +1,11 @@
 import Link from "next/link"
 
 import { BookCover } from "@/components/book-cover"
-import { progressPercent, type Book } from "@/lib/types"
+import { effectiveTotalPages, progressPercent, type Book } from "@/lib/types"
 
 export function BookCard({ book }: { book: Book }) {
   const percent = progressPercent(book)
+  const totalPages = effectiveTotalPages(book)
 
   return (
     <Link
@@ -42,7 +43,7 @@ export function BookCard({ book }: { book: Book }) {
             </div>
             <p className="text-[0.68rem] text-muted-foreground">
               {percent !== null
-                ? `${percent}% · pág. ${book.current_page}`
+                ? `${percent}% · pág. ${book.current_page}${totalPages ? `/${totalPages}` : ""}`
                 : `pág. ${book.current_page}`}
             </p>
           </div>

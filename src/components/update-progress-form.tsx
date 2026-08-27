@@ -5,6 +5,7 @@ import { useActionState } from "react"
 import { SubmitButton } from "@/components/submit-button"
 import { Input } from "@/components/ui/input"
 import { updateProgress, type ActionState } from "@/lib/actions/books"
+import { localDateString } from "@/lib/types"
 
 export function UpdateProgressForm({
   bookId,
@@ -20,8 +21,13 @@ export function UpdateProgressForm({
     undefined
   )
 
+  function submit(formData: FormData) {
+    formData.set("read_on", localDateString())
+    formAction(formData)
+  }
+
   return (
-    <form action={formAction} className="space-y-2.5">
+    <form action={submit} className="space-y-2.5">
       <input type="hidden" name="id" value={bookId} />
       {state?.error && (
         <p className="text-xs text-destructive">{state.error}</p>
@@ -44,7 +50,7 @@ export function UpdateProgressForm({
             defaultValue={currentPage || ""}
             key={currentPage}
             placeholder="0"
-          className="h-11"
+            className="h-11"
             required
           />
         </div>

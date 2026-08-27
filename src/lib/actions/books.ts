@@ -3,9 +3,12 @@
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 import { createClient } from "@/lib/supabase/server"
-import { STATUS_VALUES, type BookStatus } from "@/lib/types"
+import { syncAchievements } from "@/lib/achievements"
+import { STATUS_VALUES, type Achievement, type BookStatus } from "@/lib/types"
 
-export type ActionState = { error?: string } | undefined
+export type ActionState =
+  | { error?: string; success?: string; unlocked?: Achievement[] }
+  | undefined
 
 function str(formData: FormData, name: string) {
   const value = formData.get(name)
@@ -19,6 +22,20 @@ function nullableInt(formData: FormData, name: string) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null
 }
 
+function nonNegativeInt(formData: FormData, name: string) {
+  const raw = str(formData, name)
+  if (!raw) return null
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
+}
+
+function readDate(formData: FormData) {
+  const value = str(formData, "read_on")
+  return /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? value
+    : new Date().toISOString().slice(0, 10)
+}
+
 function parseStatus(value: string): BookStatus {
   return STATUS_VALUES.includes(value as BookStatus)
     ? (value as BookStatus)
@@ -28,7 +45,11 @@ function parseStatus(value: string): BookStatus {
 function revalidateBook(id: string | null) {
   revalidatePath("/")
   revalidatePath("/estante")
-  if (id) revalidatePath(`/livro/${id}`)
+  revalidatePath("/estatisticas")
+  if (id) {
+    revalidatePath(`/livro/${id}`)
+    revalidatePath(`/livro/${id}/ler`)
+  }
 }
 
 export async function addBook(
@@ -101,44 +122,37 @@ export async function updateProgress(
   formData: FormData
 ): Promise<ActionState> {
   const id = str(formData, "id")
-  const page = nullableInt(formData, "current_page")
+  const page = nonNegativeInt(formData, "current_page")
   if (!id || page === null) return { error: "Informe a página atual." }
+  const readOn = readDate(formData)
 
   const supabase = await createClient()
-
-  const { data: book } = await supabase
-    .from("books")
-    .select("current_page, total_pages")
-    .eq("id", id)
-    .single()
-
-  if (!book) return { error: "Livro não encontrado." }
-
-  const delta = page - book.current_page
-  const updates: Record<string, unknown> = { current_page: page }
-
-  const finished =
-    book.total_pages !== null && page >= book.total_pages
-
-  if (delta > 0) {
-    await supabase.from("progress_log").insert({
-      book_id: id,
-      pages_read: delta,
-    })
-  }
-  if (book.current_page === 0 && page > 0) {
-    updates.started_at = new Date().toISOString()
-  }
-  if (finished) {
-    updates.status = "read"
-    updates.finished_at = new Date().toISOString()
+  const { error } = await supabase.rpc("record_book_progress", {
+    p_book_id: id,
+    p_page: page,
+    p_read_on: readOn,
+  })
+  if (error) {
+    const message = error.message.toLowerCase()
+    if (message.includes("book_not_found")) return { error: "Livro não encontrado." }
+    if (message.includes("page_cannot_decrease")) {
+      return { error: "A página atual não pode ser menor que a já salva." }
+    }
+    if (message.includes("page_exceeds_total")) {
+      return { error: "A página informada ultrapassa o total do livro." }
+    }
+    return { error: "Não foi possível salvar o progresso." }
   }
 
-  const { error } = await supabase.from("books").update(updates).eq("id", id)
-  if (error) return { error: "Não foi possível salvar o progresso." }
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  const unlocked = user
+    ? await syncAchievements(supabase, user.id, readOn)
+    : []
 
   revalidateBook(id)
-  return undefined
+  return unlocked.length ? { unlocked } : undefined
 }
 
 export async function setStatus(
@@ -148,12 +162,13 @@ export async function setStatus(
   const id = str(formData, "id")
   const status = parseStatus(str(formData, "status"))
   if (!id) return { error: "Livro inválido." }
+  const readOn = readDate(formData)
 
   const supabase = await createClient()
 
   const { data: book } = await supabase
     .from("books")
-    .select("status, total_pages, started_at, finished_at")
+    .select("status, total_pages, pdf_page_count, started_at, finished_at")
     .eq("id", id)
     .single()
 
@@ -162,11 +177,13 @@ export async function setStatus(
   const updates: Record<string, unknown> = { status }
 
   if (status === "reading" && !book.started_at) {
-    updates.started_at = new Date().toISOString()
+    updates.started_at = readOn
   }
   if (status === "read") {
-    updates.finished_at = new Date().toISOString()
-    if (book.total_pages) updates.current_page = book.total_pages
+    updates.finished_at = book.finished_at ?? readOn
+    if (book.pdf_page_count ?? book.total_pages) {
+      updates.current_page = book.pdf_page_count ?? book.total_pages
+    }
   }
   if (status !== "read") {
     updates.finished_at = null
@@ -175,8 +192,15 @@ export async function setStatus(
   const { error } = await supabase.from("books").update(updates).eq("id", id)
   if (error) return { error: "Não foi possível alterar o status." }
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  const unlocked = user
+    ? await syncAchievements(supabase, user.id, readOn)
+    : []
+
   revalidateBook(id)
-  return undefined
+  return unlocked.length ? { unlocked } : undefined
 }
 
 export async function deleteBook(formData: FormData) {
@@ -184,6 +208,14 @@ export async function deleteBook(formData: FormData) {
   if (!id) return
 
   const supabase = await createClient()
+  const { data: book } = await supabase
+    .from("books")
+    .select("pdf_path")
+    .eq("id", id)
+    .single()
+  if (book?.pdf_path) {
+    await supabase.storage.from("book-pdfs").remove([book.pdf_path])
+  }
   await supabase.from("books").delete().eq("id", id)
 
   revalidateBook(id)

@@ -1,6 +1,8 @@
 import type { Metadata } from "next"
 
 import { ProfileForm } from "@/components/profile-form"
+import { DataTransfer } from "@/components/data-transfer"
+import { PwaInstallCard } from "@/components/pwa-install"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Card, CardContent } from "@/components/ui/card"
 import { getProfile } from "@/lib/queries"
@@ -50,6 +52,10 @@ export default async function PerfilPage() {
           <ProfileForm username={profile.username} />
         </CardContent>
       </Card>
+
+      <PwaInstallCard />
+
+      <DataTransfer />
 
       <p className="pt-2 text-center text-xs text-muted-foreground">
         Biblioteca v0.1.0

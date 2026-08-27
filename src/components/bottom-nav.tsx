@@ -7,6 +7,7 @@ import books from "@iconify-icons/ph/books"
 import bookOpen from "@iconify-icons/ph/book-open"
 import plusCircle from "@iconify-icons/ph/plus-circle"
 import userCircle from "@iconify-icons/ph/user-circle"
+import chartLineUp from "@iconify-icons/ph/chart-line-up"
 
 import { AppIcon } from "@/components/app-icon"
 import { cn } from "@/lib/utils"
@@ -14,6 +15,7 @@ import { cn } from "@/lib/utils"
 const ITEMS = [
   { href: "/", label: "Início", icon: arrowHome },
   { href: "/estante", label: "Estante", icon: books },
+  { href: "/estatisticas", label: "Estatísticas", icon: chartLineUp },
   { href: "/adicionar", label: "Adicionar", icon: plusCircle, primary: true },
   { href: "/perfil", label: "Perfil", icon: userCircle },
 ]
@@ -89,7 +91,7 @@ export function BottomNav({ username }: { username: string }) {
         aria-label="Navegação principal"
         className="fixed inset-x-0 bottom-0 z-50 border-t border-border/80 bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl lg:hidden"
       >
-        <div className="mx-auto grid max-w-2xl grid-cols-4 px-2">
+        <div className="mx-auto grid max-w-2xl grid-cols-5 px-1">
           {ITEMS.map(({ href, label, icon: Icon, primary }) => {
             const active = isActive(href)
 

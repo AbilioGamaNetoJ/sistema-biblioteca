@@ -3,7 +3,7 @@
 import { useActionState } from "react"
 
 import { setStatus, type ActionState } from "@/lib/actions/books"
-import { STATUS_LABELS, STATUS_VALUES, type BookStatus } from "@/lib/types"
+import { localDateString, STATUS_LABELS, STATUS_VALUES, type BookStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 export function StatusSegmented({
@@ -18,10 +18,15 @@ export function StatusSegmented({
     undefined
   )
 
+  function submit(formData: FormData) {
+    formData.set("read_on", localDateString())
+    formAction(formData)
+  }
+
   return (
     <div className="flex rounded-2xl bg-muted/80 p-1.5">
       {STATUS_VALUES.map((value) => (
-        <form key={value} action={formAction} className="flex-1">
+        <form key={value} action={submit} className="flex-1">
           <input type="hidden" name="id" value={bookId} />
           <input type="hidden" name="status" value={value} />
           <button

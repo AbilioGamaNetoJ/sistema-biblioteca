@@ -26,6 +26,7 @@ Mobile-first, com navegação inferior, instalável como PWA e deploy no Cloudfl
 2. No **SQL Editor**, execute as migrations em ordem:
    - `supabase/migrations/0001_init.sql` — tabelas `profiles`, `books`, `progress_log`, RLS, triggers e bucket `covers`
    - `supabase/migrations/0002_username_unique.sql` — username único e checagem de disponibilidade
+   - `supabase/migrations/0003_reading_features.sql` — PDFs privados, notas, metas, conquistas e registro transacional de progresso
 3. Em **Authentication → Providers**, confirme que *Email* está habilitado.
    - Para testar sem servidor de e-mail: **Authentication → Sign In / Up →
      Confirm email = OFF**.
@@ -95,6 +96,9 @@ npx opennextjs-cloudflare deploy -- --keep-vars
 - Anel de progresso + atualização rápida de página atual
 - Marcar como lido automaticamente ao chegar à última página
 - Histórico de leitura (data + páginas lidas por dia)
+- Upload de um PDF privado por livro, leitor com navegação e anotações por página
+- Estatísticas de páginas/dia, livros por mês/ano, metas e conquistas
+- Exportação/importação de dados em JSON e download separado dos PDFs
 - Avaliação de 1–5 estrelas, datas de início/fim
 - PWA: instala na tela inicial, página offline, cache de capas
 
@@ -127,8 +131,5 @@ scripts/generate-icons.mjs # geração dos ícones PWA
 
 ## Roadmap (futuro)
 
-- Upload de PDF (Supabase Storage) + leitor com marcação de páginas e anotações
-- Estatísticas de leitura (páginas/dia, gráficos) usando o `progress_log`
-- Exportar/importar dados
 - Nota: **não existe API pública da Amazon Kindle**; sincronização Kindle
   exigiria scraping não-oficial (instável e contra os termos de uso).

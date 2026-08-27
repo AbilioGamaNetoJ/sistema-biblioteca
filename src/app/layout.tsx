@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next"
 
 import { Toaster } from "@/components/ui/sonner"
+import { PwaInstallPrompt } from "@/components/pwa-install"
 import { PwaRegister } from "@/components/pwa-register"
 
 import "./globals.css"
@@ -42,6 +43,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         {children}
         <Toaster position="top-center" richColors />
         <PwaRegister />
+        <PwaInstallPrompt />
       </body>
     </html>
   )

@@ -10,6 +10,7 @@ import starFill from "@iconify-icons/ph/star-fill"
 import { AppIcon } from "@/components/app-icon"
 import { BookCover } from "@/components/book-cover"
 import { DeleteBookButton } from "@/components/delete-book-button"
+import { PdfManager } from "@/components/pdf-manager"
 import { ProgressRing } from "@/components/progress-ring"
 import { StatusSegmented } from "@/components/status-segmented"
 import { UpdateProgressForm } from "@/components/update-progress-form"
@@ -17,7 +18,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { getBookWithLog } from "@/lib/queries"
-import { progressPercent, STATUS_LABELS } from "@/lib/types"
+import { effectiveTotalPages, progressPercent, STATUS_LABELS } from "@/lib/types"
 
 export const metadata: Metadata = {
   title: "Detalhes do livro",
@@ -39,12 +40,13 @@ export default async function BookPage({
 
   const { book, log } = data
   const percent = progressPercent(book)
+  const totalPages = effectiveTotalPages(book)
 
   const info: Array<{ label: string; value: string | null }> = [
     { label: "Autor(es)", value: book.authors },
     {
       label: "Páginas",
-      value: book.total_pages ? String(book.total_pages) : null,
+      value: totalPages ? String(totalPages) : null,
     },
     {
       label: "Comecei em",
@@ -135,11 +137,11 @@ export default async function BookPage({
                 <p className="text-sm font-semibold text-muted-foreground">Seu progresso</p>
                 <p className="mt-1 text-lg font-bold tracking-tight">
                   Página {book.current_page}
-                  {book.total_pages ? ` de ${book.total_pages}` : ""}
+                  {totalPages ? ` de ${totalPages}` : ""}
                 </p>
-                {book.total_pages && (
+                {totalPages && (
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Faltam {Math.max(0, book.total_pages - book.current_page)} páginas
+                    Faltam {Math.max(0, totalPages - book.current_page)} páginas
                   </p>
                 )}
               </div>
@@ -148,12 +150,19 @@ export default async function BookPage({
               <UpdateProgressForm
                 bookId={book.id}
                 currentPage={book.current_page}
-                totalPages={book.total_pages}
+                totalPages={totalPages}
               />
             )}
           </CardContent>
         </Card>
       </div>
+
+      <PdfManager
+        bookId={book.id}
+        fileName={book.pdf_file_name}
+        fileSize={book.pdf_file_size}
+        pageCount={book.pdf_page_count}
+      />
 
       <section className="space-y-3">
         <div>

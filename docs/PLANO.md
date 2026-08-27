@@ -30,7 +30,11 @@ books        (id, user_id, google_books_id?, title, authors, cover_url,
               total_pages?, current_page, status: want_to_read|reading|read,
               rating?, started_at?, finished_at?)
 progress_log (id, book_id, read_on, pages_read)   ← histórico p/ stats futuras
+notes        (id, book_id, page_number, content)   ← anotações do leitor PDF
+reading_goals (user_id, páginas/dia, livros/mês, livros/ano)
+achievements (user_id, kind, period_key, target_value, actual_value)
 storage      bucket público "covers" (pasta por user_id, RLS por prefixo)
+             bucket privado "book-pdfs" (um PDF por livro)
 ```
 
 RLS em todas as tabelas: `user_id = auth.uid()` (ou via join em progress_log).
@@ -44,6 +48,8 @@ RLS em todas as tabelas: `user_id = auth.uid()` (ou via join em progress_log).
 - `/estante` — Abas: Quero ler · Lendo · Lidos (contadores + grid de capas)
 - `/livro/[id]` — Detalhe, status segmentado, progresso c/ auto-conclusão,
   histórico, avaliação ★, editar/excluir
+- `/livro/[id]/ler` — Leitor PDF, navegação, progresso e notas por página
+- `/estatisticas` — Páginas por dia, livros por período, metas e conquistas
 - `/livro/[id]/editar` — Edição completa (capa por URL ou upload)
 - `/adicionar` — Busca Google Books (debounce + cache 1h server-side) +
   cadastro manual
@@ -61,17 +67,16 @@ RLS em todas as tabelas: `user_id = auth.uid()` (ou via join em progress_log).
 | 5 | CRUD livros (busca, estante, detalhe, progresso, edição) | ✅ Concluída |
 | 6 | Wrangler/deploy + lint/typecheck/build worker | ✅ Concluída |
 | 7 | Migração npm → bun | ✅ Concluída |
+| 8 | Leitor PDF, notas, estatísticas, metas, conquistas e backup | ✅ Implementada |
 
 ## Próximos passos imediatos
 
 - [ ] Deploy no Cloudflare: `bunx wrangler login && bun run deploy`
 - [ ] Teste E2E manual do fluxo completo (cadastro → adicionar → progresso)
 
-## Roadmap futuro (fora do MVP)
+## Roadmap futuro (fora desta fase)
 
-- Upload de PDF (Supabase Storage) + leitor com marcação de páginas e anotações
-  (tabela `notes`)
-- Estatísticas de leitura (páginas/dia, gráficos) usando o `progress_log`
-- Exportar/importar dados
+- Busca textual e ferramentas avançadas de destaque no leitor PDF
+- Exportação de PDFs dentro de um pacote ZIP
 - ~~Sincronização Kindle~~ — sem API pública da Amazon; só via scraping
   não-oficial (instável, contra os termos)

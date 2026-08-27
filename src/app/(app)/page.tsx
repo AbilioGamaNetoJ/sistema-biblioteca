@@ -10,10 +10,11 @@ import { AppIcon } from "@/components/app-icon"
 import { BookCover } from "@/components/book-cover"
 import { ProgressRing } from "@/components/progress-ring"
 import { UpdateProgressForm } from "@/components/update-progress-form"
+import { GoalSummary } from "@/components/goal-summary"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { getBooks, getProfile, getStats } from "@/lib/queries"
-import { progressPercent } from "@/lib/types"
+import { effectiveTotalPages, progressPercent } from "@/lib/types"
 
 export default async function DashboardPage() {
   const [profile, reading, stats] = await Promise.all([
@@ -97,6 +98,8 @@ export default async function DashboardPage() {
         ))}
       </section>
 
+      <GoalSummary />
+
       <section className="space-y-4">
         <div className="flex items-end justify-between gap-4">
           <div>
@@ -172,7 +175,7 @@ export default async function DashboardPage() {
                           <UpdateProgressForm
                             bookId={book.id}
                             currentPage={book.current_page}
-                            totalPages={book.total_pages}
+                            totalPages={effectiveTotalPages(book)}
                           />
                         </div>
                       </div>
