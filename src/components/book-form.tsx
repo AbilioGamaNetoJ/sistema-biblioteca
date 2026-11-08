@@ -1,6 +1,8 @@
 "use client"
 
-import { useActionState, useState } from "react"
+import { useActionState, useRef, useState } from "react"
+import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import image from "@iconify-icons/ph/image"
 import uploadSimple from "@iconify-icons/ph/upload-simple"
@@ -9,13 +11,23 @@ import uploadingLoop from "@iconify-icons/line-md/uploading-loop"
 import { AppIcon } from "@/components/app-icon"
 import { BookCover } from "@/components/book-cover"
 import { SubmitButton } from "@/components/submit-button"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   addBook,
+  createManualBook,
   updateBook,
+  updateManualBook,
   type ActionState,
 } from "@/lib/actions/books"
+import { attachPdf } from "@/lib/actions/reading"
+import {
+  inspectReadingFile,
+  uploadCoverBlob,
+  uploadReadingFile,
+} from "@/lib/reading-file-client"
+import { READING_FILE_ACCEPT, readingFormatLabel } from "@/lib/reading-file"
 import { createClient } from "@/lib/supabase/client"
 import { STATUS_LABELS, STATUS_VALUES, type Book } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -27,16 +39,34 @@ interface BookFormProps {
 
 const inputClass = "h-11"
 
+type PendingReadingFile = {
+  file: File
+  pageCount: number
+}
+
 export function BookForm({ mode, book }: BookFormProps) {
   const action = mode === "create" ? addBook : updateBook
   const [state, formAction] = useActionState<ActionState, FormData>(
     action,
     undefined
   )
+  const router = useRouter()
 
   const [coverUrl, setCoverUrl] = useState(book?.cover_url ?? "")
   const [title, setTitle] = useState(book?.title ?? "")
+  const [authors, setAuthors] = useState(book?.authors ?? "")
+  const [totalPages, setTotalPages] = useState(
+    book?.total_pages ? String(book.total_pages) : ""
+  )
   const [uploading, setUploading] = useState(false)
+  const [inspecting, setInspecting] = useState(false)
+  const [savingFile, setSavingFile] = useState(false)
+  const [readingFile, setReadingFile] = useState<PendingReadingFile | null>(null)
+  const [fileError, setFileError] = useState<string | null>(null)
+  const [createdId, setCreatedId] = useState<string | null>(null)
+  const createdIdRef = useRef<string | null>(null)
+  const savingRef = useRef(false)
+  const inspectRequest = useRef(0)
 
   async function handleCoverFile(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -75,14 +105,167 @@ export function BookForm({ mode, book }: BookFormProps) {
     }
   }
 
+  async function handleReadingFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ""
+    if (!file) return
+
+    const requestId = ++inspectRequest.current
+    setInspecting(true)
+    setFileError(null)
+    try {
+      const info = await inspectReadingFile(file)
+      if (requestId !== inspectRequest.current) return
+      if (info.title) setTitle(info.title)
+      if (info.authors) setAuthors(info.authors)
+      if (info.pageCount > 0) setTotalPages(String(info.pageCount))
+      if (info.coverBlob) {
+        const uploadedCover = await uploadCoverBlob(info.coverBlob)
+        if (requestId !== inspectRequest.current) return
+        if (uploadedCover) setCoverUrl(uploadedCover)
+        else toast.error("Não foi possível usar a capa do arquivo.")
+      }
+      setReadingFile({ file, pageCount: info.pageCount })
+      toast.success("Arquivo lido. Os campos encontrados foram preenchidos.")
+    } catch (error) {
+      if (requestId !== inspectRequest.current) return
+      setReadingFile(null)
+      setFileError(
+        error instanceof Error ? error.message : "Não foi possível ler o arquivo."
+      )
+    } finally {
+      if (requestId === inspectRequest.current) setInspecting(false)
+    }
+  }
+
+  function clearReadingFile() {
+    inspectRequest.current += 1
+    setReadingFile(null)
+    setInspecting(false)
+  }
+
+  async function submitWithFile(formData: FormData) {
+    if (!readingFile || savingRef.current) return
+    savingRef.current = true
+    setSavingFile(true)
+    setFileError(null)
+    try {
+      let bookId = createdIdRef.current
+      if (!bookId) {
+        const created = await createManualBook(formData)
+        if ("error" in created) {
+          setFileError(created.error)
+          return
+        }
+        bookId = created.id
+        createdIdRef.current = bookId
+        setCreatedId(bookId)
+      } else {
+        formData.set("id", bookId)
+        const updated = await updateManualBook(formData)
+        if ("error" in updated) {
+          setFileError(updated.error)
+          return
+        }
+      }
+
+      const uploaded = await uploadReadingFile({
+        bookId,
+        file: readingFile.file,
+        pageCount: readingFile.pageCount,
+      })
+      if ("error" in uploaded) {
+        setFileError(uploaded.error)
+        return
+      }
+
+      const attached = await attachPdf(undefined, uploaded.formData)
+      if (attached?.error) {
+        setFileError(attached.error)
+        return
+      }
+
+      router.push(`/livro/${bookId}`)
+    } catch (error) {
+      setFileError(
+        error instanceof Error ? error.message : "Não foi possível salvar o livro."
+      )
+    } finally {
+      savingRef.current = false
+      setSavingFile(false)
+    }
+  }
+
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    if (mode !== "create" || (!readingFile && !createdIdRef.current)) return
+    event.preventDefault()
+    if (!readingFile && createdIdRef.current) {
+      router.push(`/livro/${createdIdRef.current}`)
+      return
+    }
+    const formData = new FormData(event.currentTarget)
+    void submitWithFile(formData)
+  }
+
+  const formError = fileError ?? state?.error
+
   return (
-    <form action={formAction} className="space-y-5">
+    <form action={formAction} onSubmit={handleSubmit} className="space-y-5">
       {book && <input type="hidden" name="id" value={book.id} />}
 
-      {state?.error && (
+      {formError && (
         <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {state.error}
+          {formError}
         </p>
+      )}
+      {createdId && fileError && (
+        <Button type="button" variant="outline" className="w-full" render={<Link href={`/livro/${createdId}`} />}>
+          Abrir livro criado
+        </Button>
+      )}
+
+      {mode === "create" && (
+        <div className="space-y-2">
+          <Label htmlFor="reading-file">PDF ou EPUB</Label>
+          <label
+            htmlFor="reading-file"
+            className="flex min-h-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-2xl border border-dashed border-primary/35 bg-primary/5 px-4 py-3 text-center transition-colors hover:bg-primary/10"
+          >
+            <AppIcon
+              icon={inspecting ? uploadingLoop : uploadSimple}
+              className="size-5 text-primary"
+            />
+            <span className="max-w-full truncate text-sm font-semibold">
+              {inspecting
+                ? "Lendo arquivo..."
+                : readingFile
+                  ? readingFile.file.name
+                  : "Enviar PDF ou EPUB"}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {readingFile
+                ? `${readingFormatLabel(readingFile.file.name)} · ${readingFile.pageCount} páginas · até 50 MB`
+                : "Preenche título, autor, páginas e capa quando o arquivo tiver esses dados"}
+            </span>
+            <input
+              id="reading-file"
+              type="file"
+              accept={READING_FILE_ACCEPT}
+              className="hidden"
+              onChange={handleReadingFile}
+              disabled={inspecting || savingFile}
+            />
+          </label>
+          {readingFile && (
+            <button
+              type="button"
+              onClick={clearReadingFile}
+              className="text-xs text-muted-foreground hover:text-destructive"
+            >
+              Remover arquivo
+            </button>
+          )}
+        </div>
       )}
 
       <div className="flex gap-4">
@@ -109,7 +292,8 @@ export function BookForm({ mode, book }: BookFormProps) {
               name="authors"
               className={inputClass}
               placeholder="Ex.: Machado de Assis"
-              defaultValue={book?.authors ?? ""}
+              value={authors}
+              onChange={(e) => setAuthors(e.target.value)}
             />
           </div>
         </div>
@@ -126,7 +310,8 @@ export function BookForm({ mode, book }: BookFormProps) {
             inputMode="numeric"
             className={inputClass}
             placeholder="Ex.: 320"
-            defaultValue={book?.total_pages ?? ""}
+            value={totalPages}
+            onChange={(e) => setTotalPages(e.target.value)}
           />
         </div>
         {mode === "create" ? (
@@ -215,8 +400,20 @@ export function BookForm({ mode, book }: BookFormProps) {
         </div>
       </div>
 
-      <SubmitButton className="h-11 w-full" size="lg">
-        {mode === "create" ? "Adicionar livro" : "Salvar alterações"}
+      <SubmitButton
+        className="h-11 w-full"
+        size="lg"
+        disabled={savingFile || inspecting}
+      >
+        {savingFile
+          ? "Salvando..."
+          : createdId && readingFile
+            ? "Tentar anexar novamente"
+            : createdId
+              ? "Abrir livro criado"
+              : mode === "create"
+                ? "Adicionar livro"
+                : "Salvar alterações"}
       </SubmitButton>
     </form>
   )

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 
 import { syncAchievements } from "@/lib/achievements"
 import { type ActionState } from "@/lib/actions/books"
+import { readingFormat, readingStoragePath } from "@/lib/reading-file"
 import { createClient } from "@/lib/supabase/server"
 import { localDateString } from "@/lib/types"
 
@@ -139,17 +140,22 @@ export async function attachPdf(
   const fileName = text(formData, "pdf_file_name")
   const fileSize = positiveInt(formData, "pdf_file_size")
   const pageCount = positiveInt(formData, "pdf_page_count")
-  if (!bookId || !path || !fileName || !fileSize || !pageCount) {
-    return { error: "Os dados do PDF estão incompletos." }
+  const format = readingFormat(path)
+  if (!bookId || !path || !fileName || !fileSize || !pageCount || !format) {
+    return { error: "Os dados do arquivo estão incompletos." }
+  }
+  if (readingFormat(fileName) !== format) {
+    return { error: "O arquivo precisa ser PDF ou EPUB." }
   }
   if (fileSize > MAX_PDF_SIZE) {
-    return { error: "O PDF precisa ter no máximo 50 MB." }
+    return { error: "O arquivo precisa ter no máximo 50 MB." }
   }
 
   const { supabase, user } = await currentUser()
   if (!user) return { error: "Sua sessão expirou. Entre novamente." }
-  const expectedPath = `${user.id}/${bookId}.pdf`
-  if (path !== expectedPath) return { error: "Caminho de PDF inválido." }
+  if (path !== readingStoragePath(user.id, bookId, format)) {
+    return { error: "Caminho de arquivo inválido." }
+  }
 
   const { data: book, error: bookError } = await supabase
     .from("books")
@@ -168,11 +174,13 @@ export async function attachPdf(
   if (book.total_pages === null) updates.total_pages = pageCount
 
   const { error } = await supabase.from("books").update(updates).eq("id", bookId)
-  if (error) return { error: "Não foi possível associar o PDF ao livro." }
+  if (error) return { error: "Não foi possível associar o arquivo ao livro." }
 
-  if (book.pdf_path && book.pdf_path !== path) {
-    await supabase.storage.from("book-pdfs").remove([book.pdf_path])
-  }
+  const stale = new Set<string>()
+  if (book.pdf_path && book.pdf_path !== path) stale.add(book.pdf_path)
+  const sibling = readingStoragePath(user.id, bookId, format === "pdf" ? "epub" : "pdf")
+  if (sibling !== path) stale.add(sibling)
+  if (stale.size) await supabase.storage.from("book-pdfs").remove([...stale])
   revalidateReading(bookId)
   return undefined
 }
@@ -195,7 +203,7 @@ export async function removePdf(
 
   if (book.pdf_path) {
     const { error } = await supabase.storage.from("book-pdfs").remove([book.pdf_path])
-    if (error) return { error: "Não foi possível remover o arquivo PDF." }
+    if (error) return { error: "Não foi possível remover o arquivo de leitura." }
   }
 
   const { error } = await supabase
@@ -208,7 +216,7 @@ export async function removePdf(
       pdf_page_count: null,
     })
     .eq("id", bookId)
-  if (error) return { error: "Não foi possível remover o PDF do livro." }
+  if (error) return { error: "Não foi possível remover o arquivo de leitura." }
 
   revalidateReading(bookId)
   return undefined

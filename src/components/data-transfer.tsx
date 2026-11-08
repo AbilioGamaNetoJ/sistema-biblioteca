@@ -38,7 +38,7 @@ export function DataTransfer() {
       })
       const result = (await response.json()) as ImportResult
       if (!response.ok) throw new Error(result.error || "Não foi possível importar o backup.")
-      setMessage(`${result.message} ${result.createdBooks ?? 0} livros adicionados, ${result.importedProgress ?? 0} registros de progresso e ${result.importedNotes ?? 0} notas.` + (result.pendingPdfs ? ` ${result.pendingPdfs} PDF(s) precisam ser reenviados.` : ""))
+      setMessage(`${result.message} ${result.createdBooks ?? 0} livros adicionados, ${result.importedProgress ?? 0} registros de progresso e ${result.importedNotes ?? 0} notas.` + (result.pendingPdfs ? ` ${result.pendingPdfs} arquivo(s) de leitura precisam ser reenviados.` : ""))
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : "Não foi possível importar o backup.")
     } finally {
@@ -51,7 +51,7 @@ export function DataTransfer() {
       <CardContent className="space-y-4">
         <div>
           <h2 className="font-bold tracking-tight">Dados e backup</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Exporte seus livros, progresso, notas, metas e conquistas. PDFs são baixados separadamente na página de cada livro.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Exporte seus livros, progresso, notas, metas e conquistas. Os arquivos de leitura são baixados separadamente na página de cada livro.</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button render={<a href="/api/export" download="biblioteca-backup.json" />} variant="outline" className="flex-1" disabled={busy}>

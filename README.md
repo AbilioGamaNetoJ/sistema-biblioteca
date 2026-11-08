@@ -27,6 +27,7 @@ Mobile-first, com navegação inferior, instalável como PWA e deploy no Cloudfl
    - `supabase/migrations/0001_init.sql` — tabelas `profiles`, `books`, `progress_log`, RLS, triggers e bucket `covers`
    - `supabase/migrations/0002_username_unique.sql` — username único e checagem de disponibilidade
    - `supabase/migrations/0003_reading_features.sql` — PDFs privados, notas, metas, conquistas e registro transacional de progresso
+   - `supabase/migrations/0004_epub.sql` — permite EPUB (`application/epub+zip`) no bucket privado `book-pdfs`
 3. Em **Authentication → Providers**, confirme que *Email* está habilitado.
    - Para testar sem servidor de e-mail: **Authentication → Sign In / Up →
      Confirm email = OFF**.

@@ -12,12 +12,13 @@ type SubmitButtonProps = ComponentProps<typeof Button> & {
 export function SubmitButton({
   children,
   pendingLabel = "Salvando...",
+  disabled,
   ...props
 }: SubmitButtonProps) {
   const { pending } = useFormStatus()
 
   return (
-    <Button type="submit" disabled={pending} {...props}>
+    <Button type="submit" disabled={pending || disabled} {...props}>
       {pending ? pendingLabel : children}
     </Button>
   )

@@ -49,7 +49,7 @@ export default function AdicionarPage() {
               <div>
                 <h2 className="font-bold tracking-tight">Cadastrar manualmente</h2>
                 <p className="mt-0.5 text-sm text-muted-foreground">
-                  Para edições especiais, independentes ou não encontradas na busca.
+                  Para edições especiais ou não encontradas na busca. Um PDF ou EPUB preenche o formulário.
                 </p>
               </div>
             </div>

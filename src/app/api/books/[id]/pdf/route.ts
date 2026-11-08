@@ -13,16 +13,20 @@ export async function GET(
 
   const { data: book } = await supabase
     .from("books")
-    .select("pdf_path")
+    .select("pdf_path, pdf_file_name")
     .eq("id", id)
     .eq("user_id", user.id)
     .single()
-  if (!book?.pdf_path) return new Response("PDF não encontrado.", { status: 404 })
+  if (!book?.pdf_path) return new Response("Arquivo não encontrado.", { status: 404 })
 
+  const fileName =
+    typeof book.pdf_file_name === "string"
+      ? book.pdf_file_name.replace(/[\r\n"]/g, "").slice(0, 255)
+      : ""
   const { data, error } = await supabase.storage
     .from("book-pdfs")
-    .createSignedUrl(book.pdf_path, 60 * 60, { download: true })
-  if (error || !data?.signedUrl) return new Response("PDF indisponível.", { status: 404 })
+    .createSignedUrl(book.pdf_path, 60 * 60, { download: fileName || true })
+  if (error || !data?.signedUrl) return new Response("Arquivo indisponível.", { status: 404 })
 
   return Response.redirect(data.signedUrl)
 }

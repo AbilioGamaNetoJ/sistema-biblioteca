@@ -52,6 +52,20 @@ function revalidateBook(id: string | null) {
   }
 }
 
+function bookInsert(userId: string, formData: FormData) {
+  const status = parseStatus(str(formData, "status"))
+  return {
+    user_id: userId,
+    title: str(formData, "title"),
+    authors: str(formData, "authors") || null,
+    cover_url: str(formData, "cover_url") || null,
+    total_pages: nullableInt(formData, "total_pages"),
+    google_books_id: str(formData, "google_books_id") || null,
+    status,
+    started_at: status === "reading" ? new Date().toISOString() : null,
+  }
+}
+
 export async function addBook(
   _prev: ActionState,
   formData: FormData
@@ -65,20 +79,9 @@ export async function addBook(
   } = await supabase.auth.getUser()
   if (!user) redirect("/login")
 
-  const status = parseStatus(str(formData, "status"))
-
   const { data, error } = await supabase
     .from("books")
-    .insert({
-      user_id: user.id,
-      title,
-      authors: str(formData, "authors") || null,
-      cover_url: str(formData, "cover_url") || null,
-      total_pages: nullableInt(formData, "total_pages"),
-      google_books_id: str(formData, "google_books_id") || null,
-      status,
-      started_at: status === "reading" ? new Date().toISOString() : null,
-    })
+    .insert(bookInsert(user.id, formData))
     .select("id")
     .single()
 
@@ -86,6 +89,72 @@ export async function addBook(
 
   revalidateBook(data.id)
   redirect(`/livro/${data.id}`)
+}
+
+export async function createManualBook(
+  formData: FormData
+): Promise<{ id: string } | { error: string }> {
+  const title = str(formData, "title")
+  if (!title) return { error: "Informe o título do livro." }
+
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return { error: "Sua sessão expirou. Entre novamente." }
+
+  const { data, error } = await supabase
+    .from("books")
+    .insert(bookInsert(user.id, formData))
+    .select("id")
+    .single()
+
+  if (error || !data) return { error: "Não foi possível salvar o livro." }
+
+  revalidateBook(data.id)
+  return { id: data.id }
+}
+
+export async function updateManualBook(
+  formData: FormData
+): Promise<{ id: string } | { error: string }> {
+  const id = str(formData, "id")
+  const title = str(formData, "title")
+  if (!id) return { error: "Livro inválido." }
+  if (!title) return { error: "Informe o título do livro." }
+
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return { error: "Sua sessão expirou. Entre novamente." }
+
+  const status = parseStatus(str(formData, "status"))
+  const { data: existing } = await supabase
+    .from("books")
+    .select("started_at")
+    .eq("id", id)
+    .single()
+  if (!existing) return { error: "Livro não encontrado." }
+
+  const { error } = await supabase
+    .from("books")
+    .update({
+      title,
+      authors: str(formData, "authors") || null,
+      cover_url: str(formData, "cover_url") || null,
+      total_pages: nullableInt(formData, "total_pages"),
+      status,
+      started_at:
+        status === "reading"
+          ? existing.started_at ?? new Date().toISOString()
+          : existing.started_at,
+    })
+    .eq("id", id)
+
+  if (error) return { error: "Não foi possível atualizar o livro." }
+  revalidateBook(id)
+  return { id }
 }
 
 export async function updateBook(
