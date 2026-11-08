@@ -7,7 +7,9 @@ import {
   readingFormat,
   readingStoragePath,
   readingUploadErrorMessage,
+  READING_FILE_EMPTY_MESSAGE,
   READING_FILE_MAX_BYTES,
+  READING_FILE_TOO_LARGE_MESSAGE,
   type ReadingFormat,
 } from "@/lib/reading-file"
 import type { Book as EpubBook } from "epubjs"
@@ -29,8 +31,9 @@ function cleanMeta(value: unknown) {
 function assertReadingFile(file: File) {
   const format = readingFormat(file.name)
   if (!format) throw new Error("Selecione um arquivo PDF ou EPUB.")
-  if (file.size <= 0 || file.size > READING_FILE_MAX_BYTES) {
-    throw new Error("O arquivo precisa ter entre 1 byte e 50 MB.")
+  if (file.size <= 0) throw new Error(READING_FILE_EMPTY_MESSAGE)
+  if (file.size > READING_FILE_MAX_BYTES) {
+    throw new Error(READING_FILE_TOO_LARGE_MESSAGE)
   }
   return format
 }

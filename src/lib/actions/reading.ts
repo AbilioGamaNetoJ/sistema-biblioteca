@@ -4,21 +4,31 @@ import { revalidatePath } from "next/cache"
 
 import { syncAchievements } from "@/lib/achievements"
 import { type ActionState } from "@/lib/actions/books"
-import { readingFormat, readingStoragePath } from "@/lib/reading-file"
+import {
+  READING_FILE_EMPTY_MESSAGE,
+  READING_FILE_MAX_BYTES,
+  READING_FILE_TOO_LARGE_MESSAGE,
+  readingFormat,
+  readingStoragePath,
+} from "@/lib/reading-file"
 import { createClient } from "@/lib/supabase/server"
 import { localDateString } from "@/lib/types"
 
 export type { ActionState } from "@/lib/actions/books"
-const MAX_PDF_SIZE = 50 * 1024 * 1024
 
 function text(formData: FormData, name: string) {
   const value = formData.get(name)
   return typeof value === "string" ? value.trim() : ""
 }
 
-function positiveInt(formData: FormData, name: string) {
+function integer(formData: FormData, name: string) {
   const value = Number.parseInt(text(formData, name), 10)
-  return Number.isFinite(value) && value > 0 ? value : null
+  return Number.isFinite(value) ? value : null
+}
+
+function positiveInt(formData: FormData, name: string) {
+  const value = integer(formData, name)
+  return value !== null && value > 0 ? value : null
 }
 
 function revalidateReading(bookId?: string) {
@@ -138,17 +148,20 @@ export async function attachPdf(
   const bookId = text(formData, "book_id")
   const path = text(formData, "pdf_path")
   const fileName = text(formData, "pdf_file_name")
-  const fileSize = positiveInt(formData, "pdf_file_size")
+  const fileSize = integer(formData, "pdf_file_size")
   const pageCount = positiveInt(formData, "pdf_page_count")
   const format = readingFormat(path)
-  if (!bookId || !path || !fileName || !fileSize || !pageCount || !format) {
+  if (fileSize !== null && fileSize <= 0) {
+    return { error: READING_FILE_EMPTY_MESSAGE }
+  }
+  if (!bookId || !path || !fileName || fileSize === null || !pageCount || !format) {
     return { error: "Os dados do arquivo estão incompletos." }
   }
   if (readingFormat(fileName) !== format) {
     return { error: "O arquivo precisa ser PDF ou EPUB." }
   }
-  if (fileSize > MAX_PDF_SIZE) {
-    return { error: "O arquivo precisa ter no máximo 50 MB." }
+  if (fileSize > READING_FILE_MAX_BYTES) {
+    return { error: READING_FILE_TOO_LARGE_MESSAGE }
   }
 
   const { supabase, user } = await currentUser()

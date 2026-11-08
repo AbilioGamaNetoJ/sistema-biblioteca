@@ -14,7 +14,11 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { attachPdf, removePdf, type ActionState } from "@/lib/actions/reading"
 import { inspectReadingFile, uploadReadingFile } from "@/lib/reading-file-client"
-import { READING_FILE_ACCEPT, readingFormatLabel } from "@/lib/reading-file"
+import {
+  READING_FILE_ACCEPT,
+  READING_FILE_MAX_LABEL,
+  readingFormatLabel,
+} from "@/lib/reading-file"
 
 export function PdfManager({
   bookId,
@@ -128,7 +132,7 @@ export function PdfManager({
           <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-primary/35 bg-primary/5 px-4 text-center transition-colors hover:bg-primary/10">
             <AppIcon icon={uploadSimple} className="size-5 text-primary" />
             <span className="text-sm font-semibold">Escolher PDF ou EPUB</span>
-            <span className="text-xs text-muted-foreground">Até 50 MB</span>
+            <span className="text-xs text-muted-foreground">Até {READING_FILE_MAX_LABEL}</span>
             <input
               type="file"
               accept={READING_FILE_ACCEPT}

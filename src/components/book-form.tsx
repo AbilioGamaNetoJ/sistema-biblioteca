@@ -27,7 +27,11 @@ import {
   uploadCoverBlob,
   uploadReadingFile,
 } from "@/lib/reading-file-client"
-import { READING_FILE_ACCEPT, readingFormatLabel } from "@/lib/reading-file"
+import {
+  READING_FILE_ACCEPT,
+  READING_FILE_MAX_LABEL,
+  readingFormatLabel,
+} from "@/lib/reading-file"
 import { createClient } from "@/lib/supabase/client"
 import { STATUS_LABELS, STATUS_VALUES, type Book } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -244,7 +248,7 @@ export function BookForm({ mode, book }: BookFormProps) {
             </span>
             <span className="text-xs text-muted-foreground">
               {readingFile
-                ? `${readingFormatLabel(readingFile.file.name)} · ${readingFile.pageCount} páginas · até 50 MB`
+                ? `${readingFormatLabel(readingFile.file.name)} · ${readingFile.pageCount} páginas · até ${READING_FILE_MAX_LABEL}`
                 : "Preenche título, autor, páginas e capa quando o arquivo tiver esses dados"}
             </span>
             <input
