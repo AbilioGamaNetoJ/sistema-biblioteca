@@ -1,26 +1,25 @@
 "use client"
 
 import { useEffect, useRef, useState, useActionState } from "react"
-import arrowLeft from "@iconify-icons/ph/arrow-left"
-import arrowRight from "@iconify-icons/ph/arrow-right"
-import minus from "@iconify-icons/ph/minus"
-import plus from "@iconify-icons/ph/plus"
-import type { Book as EpubBook, Rendition } from "epubjs"
+import type { Book as EpubBook, Location, Rendition } from "epubjs"
 
-import { AppIcon } from "@/components/app-icon"
 import { NotesPanel } from "@/components/notes-panel"
-import { SubmitButton } from "@/components/submit-button"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
+import { ReaderShell } from "@/components/reader-shell"
 import { updateProgress, type ActionState } from "@/lib/actions/books"
-import {
-  countEpubLocations,
-  epubCfiFromPage,
-  epubPageFromCfi,
-  openEpubBook,
-} from "@/lib/reading-file-client"
+import { countEpubLocations, epubCfiFromPage, epubPageFromCfi, openEpubBook } from "@/lib/reading-file-client"
 import { localDateString, type Note } from "@/lib/types"
+
+const SWIPE_DISTANCE = 48
+const TAP_SLOP = 16
+const MIN_ZOOM = 0.8
+const MAX_ZOOM = 2
+
+type Turn = "next" | "prev"
+
+function stepZoom(value: number, direction: -1 | 1) {
+  const next = Math.round((value + direction * 0.1) * 10) / 10
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next))
+}
 
 export function EpubReader({
   bookId,
@@ -41,6 +40,13 @@ export function EpubReader({
   const bookRef = useRef<EpubBook | null>(null)
   const renditionRef = useRef<Rendition | null>(null)
   const initialPage = Math.max(1, currentPage || 1)
+  const savedPageRef = useRef(initialPage)
+  const pageNumberRef = useRef(initialPage)
+  const atStartRef = useRef(initialPage <= 1)
+  const atEndRef = useRef(false)
+  const pendingTurn = useRef<Turn | null>(null)
+  const zoomRef = useRef(1)
+  const gestureRef = useRef<{ x: number; y: number; pointerId: number } | null>(null)
   const [pageNumber, setPageNumber] = useState(initialPage)
   const [pageCount, setPageCount] = useState(totalPages ?? 0)
   const [zoom, setZoom] = useState(1)
@@ -51,10 +57,24 @@ export function EpubReader({
   const [error, setError] = useState<string | null>(null)
   const [state, formAction] = useActionState<ActionState, FormData>(updateProgress, undefined)
 
+  function rememberPage(value: number) {
+    pageNumberRef.current = value
+    setPageNumber(value)
+  }
+
   function savePage(formData: FormData) {
+    formData.set("current_page", String(pageNumberRef.current))
     formData.set("read_on", localDateString())
     formAction(formData)
   }
+
+  useEffect(() => {
+    savedPageRef.current = Math.max(1, currentPage || 1)
+  }, [currentPage])
+
+  useEffect(() => {
+    zoomRef.current = zoom
+  }, [zoom])
 
   useEffect(() => {
     const viewer = viewerRef.current
@@ -73,29 +93,45 @@ export function EpubReader({
       const count = await countEpubLocations(book)
       if (cancelled) {
         book.destroy()
+        bookRef.current = null
         return
       }
-      const start = Math.min(Math.max(1, currentPage || 1), count)
+      const start = Math.min(savedPageRef.current, count)
       setPageCount(count)
-      setPageNumber(start)
+      rememberPage(start)
+      atStartRef.current = start <= 1
+      setAtStart(start <= 1)
+      atEndRef.current = false
+      setAtEnd(false)
+      pendingTurn.current = null
 
+      const width = Math.max(1, Math.floor(viewer!.clientWidth))
+      const height = Math.max(1, Math.floor(viewer!.clientHeight))
       const rendition = book.renderTo(viewer!, {
-        width: "100%",
-        height: "100%",
+        width,
+        height,
         flow: "paginated",
         spread: "none",
+        resizeOnOrientationChange: false,
       })
       renditionRef.current = rendition
       await rendition.started
+      if (cancelled) return
       rendition.spread("none")
-      rendition.on("relocated", (location: { start?: { cfi?: string }; atStart?: boolean; atEnd?: boolean }) => {
+      rendition.themes.fontSize(`${Math.round(zoomRef.current * 100)}%`)
+      rendition.on("relocated", (location: Location) => {
+        const startEdge = Boolean(location.atStart)
+        const endEdge = Boolean(location.atEnd)
+        atStartRef.current = startEdge
+        atEndRef.current = endEdge
+        setAtStart(startEdge)
+        setAtEnd(endEdge)
+        pendingTurn.current = null
         const cfi = location.start?.cfi
-        if (cfi) {
-          const page = epubPageFromCfi(book, cfi)
-          if (page) setPageNumber(page)
-        }
-        setAtStart(Boolean(location.atStart))
-        setAtEnd(Boolean(location.atEnd))
+        const currentBook = bookRef.current
+        if (!cfi || !currentBook) return
+        const page = epubPageFromCfi(currentBook, cfi)
+        if (page) rememberPage(page)
       })
       const cfi = epubCfiFromPage(book, start)
       if (cfi) await rendition.display(cfi)
@@ -112,137 +148,117 @@ export function EpubReader({
       bookRef.current = null
       if (cancelled) return
       const message = reason instanceof Error ? reason.message : ""
-      setError(
-        message.startsWith("Não foi possível")
-          ? message
-          : "Não foi possível abrir este EPUB."
-      )
+      setError(message.startsWith("Não foi possível") ? message : "Não foi possível abrir este EPUB.")
       setLoading(false)
     })
 
     return () => {
       cancelled = true
+      pendingTurn.current = null
       renditionRef.current?.destroy()
       bookRef.current?.destroy()
       renditionRef.current = null
       bookRef.current = null
       setReady(false)
     }
-  }, [url, currentPage])
+  }, [url])
 
   useEffect(() => {
     if (!ready) return
     renditionRef.current?.themes.fontSize(`${Math.round(zoom * 100)}%`)
   }, [ready, zoom])
 
-  function goToPage(value: number) {
-    const book = bookRef.current
+  useEffect(() => {
+    const viewer = viewerRef.current
     const rendition = renditionRef.current
-    if (!book || !rendition || !pageCount) return
-    const next = Math.min(Math.max(1, value), pageCount)
-    const cfi = epubCfiFromPage(book, next)
-    if (!cfi) return
-    setPageNumber(next)
-    void rendition.display(cfi)
+    if (!viewer || !rendition || !ready) return
+    let lastWidth = 0
+    let lastHeight = 0
+    const apply = () => {
+      const width = Math.floor(viewer.clientWidth)
+      const height = Math.floor(viewer.clientHeight)
+      if (width < 8 || height < 8) return
+      if (width === lastWidth && height === lastHeight) return
+      lastWidth = width
+      lastHeight = height
+      rendition.resize(width, height)
+      rendition.themes.fontSize(`${Math.round(zoomRef.current * 100)}%`)
+    }
+    const observer = new ResizeObserver(apply)
+    observer.observe(viewer)
+    apply()
+    return () => observer.disconnect()
+  }, [ready])
+
+  function turn(direction: Turn) {
+    const rendition = renditionRef.current
+    if (!rendition || !ready || pendingTurn.current) return
+    if (direction === "next" && atEndRef.current) return
+    if (direction === "prev" && atStartRef.current) return
+    pendingTurn.current = direction
+    const result = direction === "next" ? rendition.next() : rendition.prev()
+    void Promise.resolve(result).catch(() => {
+      if (pendingTurn.current === direction) pendingTurn.current = null
+    })
   }
 
   return (
-    <div className="space-y-5">
-      <Card className="bg-card/90">
-        <CardContent className="space-y-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-primary">Leitor EPUB</p>
-              <h1 className="truncate text-xl font-bold tracking-tight">{bookTitle}</h1>
-            </div>
-            <div className="flex items-center justify-between gap-2 rounded-xl bg-muted p-1">
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                aria-label="Página anterior"
-                disabled={loading || atStart}
-                onClick={() => void renditionRef.current?.prev()}
-              >
-                <AppIcon icon={arrowLeft} />
-              </Button>
-              <div className="flex items-center gap-1 text-sm font-semibold">
-                <Input
-                  className="h-8 w-16 text-center"
-                  type="number"
-                  min={1}
-                  max={pageCount || undefined}
-                  value={pageNumber}
-                  onChange={(event) => goToPage(Number(event.target.value) || 1)}
-                  aria-label="Página atual"
-                />
-                <span className="text-muted-foreground">/ {pageCount || "—"}</span>
-              </div>
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                aria-label="Próxima página"
-                disabled={loading || atEnd}
-                onClick={() => void renditionRef.current?.next()}
-              >
-                <AppIcon icon={arrowRight} />
-              </Button>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/70 pt-3">
-            <div className="flex items-center gap-1">
-              <span className="mr-1 text-xs text-muted-foreground">Zoom</span>
-              <Button
-                type="button"
-                size="icon-xs"
-                variant="outline"
-                aria-label="Diminuir zoom"
-                onClick={() => setZoom((value) => Math.max(0.8, Number((value - 0.1).toFixed(2))))}
-              >
-                <AppIcon icon={minus} />
-              </Button>
-              <span className="w-12 text-center text-xs font-semibold">{Math.round(zoom * 100)}%</span>
-              <Button
-                type="button"
-                size="icon-xs"
-                variant="outline"
-                aria-label="Aumentar zoom"
-                onClick={() => setZoom((value) => Math.min(2, Number((value + 0.1).toFixed(2))))}
-              >
-                <AppIcon icon={plus} />
-              </Button>
-            </div>
-            <form action={savePage} className="flex items-center gap-2">
-              <input type="hidden" name="id" value={bookId} />
-              <input type="hidden" name="current_page" value={pageNumber} />
-              <SubmitButton size="sm">Salvar página</SubmitButton>
-            </form>
-          </div>
-          {state?.error && <p className="text-xs text-destructive">{state.error}</p>}
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_22rem] xl:items-start">
-        <Card className="overflow-hidden bg-muted/50">
-          <CardContent className="p-3 sm:p-6">
-            {error ? (
-              <p className="py-20 text-center text-sm text-destructive">{error}</p>
-            ) : (
-              <div className="relative h-[72vh] min-h-[28rem] overflow-hidden rounded-sm bg-white shadow-xl">
-                {loading && (
-                  <p className="absolute inset-x-0 top-4 z-10 text-center text-xs text-muted-foreground">
-                    Abrindo EPUB...
-                  </p>
-                )}
-                <div ref={viewerRef} className="h-full w-full" />
-              </div>
-            )}
-          </CardContent>
-        </Card>
-        <NotesPanel bookId={bookId} pageNumber={pageNumber} notes={notes} />
-      </div>
-    </div>
+    <ReaderShell
+      bookTitle={bookTitle}
+      pageNumber={pageNumber}
+      pageCount={pageCount}
+      onPrev={() => turn("prev")}
+      onNext={() => turn("next")}
+      prevDisabled={loading || atStart}
+      nextDisabled={loading || atEnd}
+      zoom={zoom}
+      onZoomOut={() => setZoom((value) => stepZoom(value, -1))}
+      onZoomIn={() => setZoom((value) => stepZoom(value, 1))}
+      bookId={bookId}
+      onSave={savePage}
+      saveError={state?.error}
+      notes={<NotesPanel bookId={bookId} pageNumber={pageNumber} notes={notes} />}
+    >
+      {({ toolsOpen, toggleTools }) => (
+        <div className="relative h-full overflow-hidden bg-white">
+          {error ? (
+            <p className="px-6 py-20 text-center text-sm text-destructive">{error}</p>
+          ) : (
+            <>
+              {loading && (
+                <p className="absolute inset-x-0 top-4 z-10 text-center text-xs text-muted-foreground">Abrindo EPUB...</p>
+              )}
+              <div ref={viewerRef} className="pointer-events-none h-full w-full [&_iframe]:h-full [&_iframe]:w-full" />
+              <div
+                className="absolute inset-0 z-10 touch-none"
+                onPointerDown={(event) => {
+                  if (!ready || event.button !== 0) return
+                  event.preventDefault()
+                  event.currentTarget.setPointerCapture(event.pointerId)
+                  gestureRef.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId }
+                }}
+                onPointerUp={(event) => {
+                  const start = gestureRef.current
+                  gestureRef.current = null
+                  if (!start || start.pointerId !== event.pointerId) return
+                  const dx = event.clientX - start.x
+                  const dy = event.clientY - start.y
+                  if (Math.abs(dx) <= TAP_SLOP && Math.abs(dy) <= TAP_SLOP) {
+                    toggleTools()
+                    return
+                  }
+                  if (!toolsOpen && Math.abs(dx) >= SWIPE_DISTANCE && Math.abs(dx) > Math.abs(dy)) {
+                    turn(dx < 0 ? "next" : "prev")
+                  }
+                }}
+                onPointerCancel={() => {
+                  gestureRef.current = null
+                }}
+              />
+            </>
+          )}
+        </div>
+      )}
+    </ReaderShell>
   )
 }

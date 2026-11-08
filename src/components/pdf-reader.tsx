@@ -1,20 +1,128 @@
 "use client"
 
-import { useEffect, useRef, useState, useActionState } from "react"
-import arrowLeft from "@iconify-icons/ph/arrow-left"
-import arrowRight from "@iconify-icons/ph/arrow-right"
-import minus from "@iconify-icons/ph/minus"
-import plus from "@iconify-icons/ph/plus"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useActionState } from "react"
 
-import { AppIcon } from "@/components/app-icon"
 import { NotesPanel } from "@/components/notes-panel"
-import { SubmitButton } from "@/components/submit-button"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
+import { ReaderShell } from "@/components/reader-shell"
 import { updateProgress, type ActionState } from "@/lib/actions/books"
 import { pdfjsLib } from "@/lib/pdfjs"
 import { localDateString, type Note } from "@/lib/types"
+
+const GAP = 12
+const OVERSCAN = 1
+const MIN_ZOOM = 0.8
+const MAX_ZOOM = 2.5
+const TAP_SLOP = 10
+
+type PdfDocument = Awaited<ReturnType<typeof pdfjsLib.getDocument>["promise"]>
+
+function stepZoom(value: number, direction: -1 | 1) {
+  const next = Math.round((value + direction * 0.1) * 10) / 10
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next))
+}
+
+function screenScale() {
+  return Math.min(window.devicePixelRatio || 1, 3)
+}
+
+function mostVisiblePage(scrollTop: number, viewHeight: number, stride: number, pageHeight: number, count: number) {
+  if (!count || stride <= 0) return 1
+  const viewBottom = scrollTop + Math.max(viewHeight, 1)
+  const first = Math.max(0, Math.floor(scrollTop / stride) - 1)
+  const last = Math.min(count - 1, Math.ceil(viewBottom / stride))
+  let best = 1
+  let bestOverlap = -1
+  for (let index = first; index <= last; index += 1) {
+    const top = index * stride
+    const overlap = Math.min(top + pageHeight, viewBottom) - Math.max(top, scrollTop)
+    if (overlap > bestOverlap) {
+      bestOverlap = overlap
+      best = index + 1
+    }
+  }
+  return best
+}
+
+function lockCrispText(context: CanvasRenderingContext2D) {
+  context.imageSmoothingEnabled = false
+  const prototype = Object.getPrototypeOf(context) as CanvasRenderingContext2D
+  const descriptor = Object.getOwnPropertyDescriptor(prototype, "imageSmoothingEnabled")
+  if (!descriptor?.set) return
+  try {
+    Object.defineProperty(context, "imageSmoothingEnabled", {
+      configurable: true,
+      enumerable: true,
+      get: () => false,
+      set: () => {
+        descriptor.set?.call(context, false)
+      },
+    })
+  } catch {
+    context.imageSmoothingEnabled = false
+  }
+}
+
+function PdfPageCanvas({
+  pdf,
+  pageNumber,
+  cssWidth,
+  cssHeight,
+  top,
+  left,
+  dpr,
+}: {
+  pdf: PdfDocument
+  pageNumber: number
+  cssWidth: number
+  cssHeight: number
+  top: number
+  left: number
+  dpr: number
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    let cancelled = false
+    let cancelRender = () => {}
+
+    pdf
+      .getPage(pageNumber)
+      .then((page) => {
+        if (cancelled) return
+        const base = page.getViewport({ scale: 1 })
+        const pixelWidth = Math.max(1, Math.round(cssWidth * dpr))
+        const pixelHeight = Math.max(1, Math.round(cssHeight * dpr))
+        const viewport = page.getViewport({ scale: pixelWidth / base.width })
+        canvas.width = pixelWidth
+        canvas.height = pixelHeight
+        const context = canvas.getContext("2d", { alpha: false })
+        if (!context) return
+        lockCrispText(context)
+        const renderTask = page.render({ canvas: null, canvasContext: context, viewport })
+        cancelRender = () => {
+          renderTask.cancel()
+        }
+        return renderTask.promise
+      })
+      .catch(() => undefined)
+
+    return () => {
+      cancelled = true
+      cancelRender()
+    }
+  }, [pdf, pageNumber, cssWidth, cssHeight, dpr])
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="absolute bg-white shadow-md"
+      style={{ top, left, width: cssWidth, height: cssHeight }}
+      aria-label={`Página ${pageNumber}`}
+    />
+  )
+}
 
 export function PdfReader({
   bookId,
@@ -31,153 +139,229 @@ export function PdfReader({
   totalPages: number | null
   notes: Note[]
 }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const documentRef = useRef<Awaited<ReturnType<typeof pdfjsLib.getDocument>["promise"]> | null>(null)
-  const [pageNumber, setPageNumber] = useState(Math.max(1, currentPage || 1))
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const initialPage = Math.max(1, currentPage || 1)
+  const pageNumberRef = useRef(initialPage)
+  const gestureRef = useRef<{ x: number; y: number; pointerId: number } | null>(null)
+  const scrollFrameRef = useRef(0)
+  const [pdf, setPdf] = useState<PdfDocument | null>(null)
+  const [base, setBase] = useState<{ width: number; height: number } | null>(null)
+  const [pageNumber, setPageNumber] = useState(initialPage)
   const [pageCount, setPageCount] = useState(totalPages ?? 0)
-  const [zoom, setZoom] = useState(1.15)
-  const [loading, setLoading] = useState(true)
+  const [zoom, setZoom] = useState(1)
+  const [scrollTop, setScrollTop] = useState(0)
+  const [frame, setFrame] = useState({ width: 0, height: 0, dpr: 1 })
   const [error, setError] = useState<string | null>(null)
+  const [documentUrl, setDocumentUrl] = useState(url)
+  const [pinnedScroll, setPinnedScroll] = useState<number | null>(null)
   const [state, formAction] = useActionState<ActionState, FormData>(updateProgress, undefined)
 
+  const metrics = useMemo(() => {
+    if (!base || frame.width < 8 || !pageCount) return null
+    const fitWidth = Math.floor(frame.width)
+    const cssWidth = Math.max(1, Math.round(fitWidth * zoom))
+    const cssHeight = Math.max(1, Math.round(base.height * (cssWidth / base.width)))
+    return {
+      cssWidth,
+      cssHeight,
+      stride: cssHeight + GAP,
+      pageCount,
+      contentWidth: Math.max(fitWidth, cssWidth),
+    }
+  }, [base, frame.width, pageCount, zoom])
+
+  const visiblePages = useMemo(() => {
+    if (!metrics) return []
+    const start = Math.max(1, Math.floor(scrollTop / metrics.stride) + 1 - OVERSCAN)
+    const end = Math.min(metrics.pageCount, Math.ceil((scrollTop + frame.height) / metrics.stride) + OVERSCAN)
+    return Array.from({ length: Math.max(0, end - start + 1) }, (_, offset) => start + offset)
+  }, [metrics, scrollTop, frame.height])
+
+  const layoutKey = metrics ? `${url}:${metrics.stride}:${metrics.cssWidth}` : ""
+  const [appliedLayout, setAppliedLayout] = useState("")
+  if (metrics && layoutKey !== appliedLayout) {
+    const sameBook = appliedLayout.startsWith(`${url}:`)
+    const page = sameBook ? pageNumber : Math.min(metrics.pageCount, Math.max(1, currentPage || 1))
+    const top = (page - 1) * metrics.stride
+    setAppliedLayout(layoutKey)
+    if (page !== pageNumber) setPageNumber(page)
+    setScrollTop(top)
+    setPinnedScroll(top)
+  }
+
+  if (documentUrl !== url) {
+    setDocumentUrl(url)
+    setPdf(null)
+    setBase(null)
+    setError(null)
+  }
+
   function savePage(formData: FormData) {
+    formData.set("current_page", String(pageNumberRef.current))
     formData.set("read_on", localDateString())
     formAction(formData)
   }
 
   useEffect(() => {
+    pageNumberRef.current = pageNumber
+  }, [pageNumber])
+
+  useEffect(() => {
     let cancelled = false
     const task = pdfjsLib.getDocument({ url })
     task.promise
-      .then((document) => {
+      .then(async (document) => {
         if (cancelled) {
-          document.cleanup()
+          await task.destroy()
           return
         }
-        documentRef.current = document
+        const first = await document.getPage(1)
+        if (cancelled) {
+          await task.destroy()
+          return
+        }
+        const viewport = first.getViewport({ scale: 1 })
+        setPdf(document)
+        setBase({ width: viewport.width, height: viewport.height })
         setPageCount(document.numPages)
-        setPageNumber((page) => Math.min(Math.max(1, page), document.numPages))
-        setLoading(false)
       })
       .catch(() => {
-        if (!cancelled) {
-          setError("Não foi possível abrir este PDF.")
-          setLoading(false)
-        }
+        if (!cancelled) setError("Não foi possível abrir este PDF.")
       })
 
     return () => {
       cancelled = true
       void task.destroy()
-      documentRef.current = null
     }
   }, [url])
 
   useEffect(() => {
-    const document = documentRef.current
-    const canvas = canvasRef.current
-    if (!document || !canvas || !pageNumber) return
-    let cancelled = false
-    document
-      .getPage(pageNumber)
-      .then((page) => {
-        if (cancelled) return
-        const viewport = page.getViewport({ scale: zoom })
-        const context = canvas.getContext("2d")
-        if (!context) throw new Error("Canvas indisponível")
-        canvas.width = viewport.width
-        canvas.height = viewport.height
-        canvas.style.width = `${viewport.width}px`
-        canvas.style.height = `${viewport.height}px`
-        return page.render({ canvas, canvasContext: context, viewport }).promise
-      })
-      .then(() => {
-        if (!cancelled) setLoading(false)
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setError("Não foi possível renderizar esta página.")
-          setLoading(false)
-        }
-      })
-
-    return () => {
-      cancelled = true
+    const element = scrollRef.current
+    if (!element) return
+    const measure = () => {
+      const width = element.clientWidth
+      const height = element.clientHeight
+      const dpr = screenScale()
+      setFrame((current) =>
+        current.width === width && current.height === height && current.dpr === dpr
+          ? current
+          : { width, height, dpr }
+      )
     }
-  }, [pageNumber, zoom, pageCount])
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    window.addEventListener("resize", measure)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener("resize", measure)
+    }
+  }, [error, pdf])
 
-  function goToPage(value: number) {
-    if (!pageCount) return
-    setPageNumber(Math.min(Math.max(1, value), pageCount))
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current
+    if (!scroller || pinnedScroll === null) return
+    scroller.scrollTop = pinnedScroll
+  }, [pinnedScroll])
+
+  useEffect(() => {
+    return () => {
+      if (scrollFrameRef.current) cancelAnimationFrame(scrollFrameRef.current)
+    }
+  }, [])
+
+  function remember(page: number) {
+    pageNumberRef.current = page
+    setPageNumber(page)
+  }
+
+  function jump(page: number) {
+    const scroller = scrollRef.current
+    if (!scroller || !metrics) return
+    const next = Math.min(metrics.pageCount, Math.max(1, page))
+    remember(next)
+    const top = (next - 1) * metrics.stride
+    scroller.scrollTop = top
+    setScrollTop(top)
+  }
+
+  function onScroll() {
+    const scroller = scrollRef.current
+    if (!scroller || !metrics) return
+    if (scrollFrameRef.current) cancelAnimationFrame(scrollFrameRef.current)
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      const top = scroller.scrollTop
+      setScrollTop((current) => (Math.abs(current - top) < 1 ? current : top))
+      const visible = mostVisiblePage(top, scroller.clientHeight, metrics.stride, metrics.cssHeight, metrics.pageCount)
+      if (visible !== pageNumberRef.current) remember(visible)
+    })
   }
 
   return (
-    <div className="space-y-5">
-      <Card className="bg-card/90">
-        <CardContent className="space-y-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-primary">Leitor</p>
-              <h1 className="truncate text-xl font-bold tracking-tight">{bookTitle}</h1>
-            </div>
-            <div className="flex items-center justify-between gap-2 rounded-xl bg-muted p-1">
-              <Button type="button" size="icon-sm" variant="ghost" aria-label="Página anterior" disabled={pageNumber <= 1} onClick={() => goToPage(pageNumber - 1)}>
-                <AppIcon icon={arrowLeft} />
-              </Button>
-              <div className="flex items-center gap-1 text-sm font-semibold">
-                <Input
-                  className="h-8 w-16 text-center"
-                  type="number"
-                  min={1}
-                  max={pageCount || undefined}
-                  value={pageNumber}
-                  onChange={(event) => goToPage(Number(event.target.value) || 1)}
-                  aria-label="Página atual"
+    <ReaderShell
+      bookTitle={bookTitle}
+      pageNumber={pageNumber}
+      pageCount={pageCount}
+      onPrev={() => jump(pageNumberRef.current - 1)}
+      onNext={() => jump(pageNumberRef.current + 1)}
+      prevDisabled={pageNumber <= 1}
+      nextDisabled={!pageCount || pageNumber >= pageCount}
+      onCommitPage={jump}
+      zoom={zoom}
+      onZoomOut={() => setZoom((value) => stepZoom(value, -1))}
+      onZoomIn={() => setZoom((value) => stepZoom(value, 1))}
+      bookId={bookId}
+      onSave={savePage}
+      saveError={state?.error}
+      notes={<NotesPanel bookId={bookId} pageNumber={pageNumber} notes={notes} />}
+    >
+      {({ toggleTools }) => (
+        <div
+          ref={scrollRef}
+          className="h-full w-full overflow-auto overscroll-contain bg-muted/40"
+          onScroll={onScroll}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return
+            gestureRef.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId }
+          }}
+          onPointerUp={(event) => {
+            const start = gestureRef.current
+            gestureRef.current = null
+            if (!start || start.pointerId !== event.pointerId) return
+            if (Math.abs(event.clientX - start.x) > TAP_SLOP || Math.abs(event.clientY - start.y) > TAP_SLOP) return
+            toggleTools()
+          }}
+          onPointerCancel={() => {
+            gestureRef.current = null
+          }}
+        >
+          {error ? (
+            <p className="px-6 py-20 text-center text-sm text-destructive">{error}</p>
+          ) : !pdf || !metrics ? (
+            <p className="px-6 py-20 text-center text-sm text-muted-foreground">Carregando páginas...</p>
+          ) : (
+            <div
+              className="relative"
+              style={{
+                width: metrics.contentWidth,
+                height: Math.max(metrics.cssHeight, (metrics.pageCount - 1) * metrics.stride + metrics.cssHeight),
+              }}
+            >
+              {visiblePages.map((page) => (
+                <PdfPageCanvas
+                  key={page}
+                  pdf={pdf}
+                  pageNumber={page}
+                  cssWidth={metrics.cssWidth}
+                  cssHeight={metrics.cssHeight}
+                  top={(page - 1) * metrics.stride}
+                  left={(metrics.contentWidth - metrics.cssWidth) / 2}
+                  dpr={frame.dpr}
                 />
-                <span className="text-muted-foreground">/ {pageCount || "—"}</span>
-              </div>
-              <Button type="button" size="icon-sm" variant="ghost" aria-label="Próxima página" disabled={!pageCount || pageNumber >= pageCount} onClick={() => goToPage(pageNumber + 1)}>
-                <AppIcon icon={arrowRight} />
-              </Button>
+              ))}
             </div>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/70 pt-3">
-            <div className="flex items-center gap-1">
-              <span className="mr-1 text-xs text-muted-foreground">Zoom</span>
-              <Button type="button" size="icon-xs" variant="outline" aria-label="Diminuir zoom" onClick={() => setZoom((value) => Math.max(0.7, value - 0.1))}>
-                <AppIcon icon={minus} />
-              </Button>
-              <span className="w-12 text-center text-xs font-semibold">{Math.round(zoom * 100)}%</span>
-              <Button type="button" size="icon-xs" variant="outline" aria-label="Aumentar zoom" onClick={() => setZoom((value) => Math.min(2.5, value + 0.1))}>
-                <AppIcon icon={plus} />
-              </Button>
-            </div>
-            <form action={savePage} className="flex items-center gap-2">
-              <input type="hidden" name="id" value={bookId} />
-              <input type="hidden" name="current_page" value={pageNumber} />
-              <SubmitButton size="sm">Salvar página</SubmitButton>
-            </form>
-          </div>
-          {state?.error && <p className="text-xs text-destructive">{state.error}</p>}
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_22rem] xl:items-start">
-        <Card className="overflow-auto bg-muted/50">
-          <CardContent className="flex min-h-[26rem] min-w-full items-start justify-center p-3 sm:p-6">
-            {error ? (
-              <p className="py-20 text-sm text-destructive">{error}</p>
-            ) : (
-              <div className="relative">
-                {loading && <p className="absolute inset-x-0 top-4 z-10 text-center text-xs text-muted-foreground">Carregando página...</p>}
-                <canvas ref={canvasRef} className="mx-auto rounded-sm bg-white shadow-xl" aria-label={`Página ${pageNumber}`} />
-              </div>
-            )}
-          </CardContent>
-        </Card>
-        <NotesPanel bookId={bookId} pageNumber={pageNumber} notes={notes} />
-      </div>
-    </div>
+          )}
+        </div>
+      )}
+    </ReaderShell>
   )
 }
