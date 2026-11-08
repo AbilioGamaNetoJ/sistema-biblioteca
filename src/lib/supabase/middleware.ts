@@ -5,7 +5,8 @@ import { createServerClient } from "@supabase/ssr"
 import { NextResponse } from "next/dist/server/web/spec-extension/response"
 import type { NextRequest } from "next/server"
 
-const PUBLIC_PATHS = ["/login", "/cadastro"]
+const PUBLIC_PATHS = ["/login", "/cadastro", "/esqueci-senha"]
+const AUTH_CALLBACK_PATHS = ["/auth/confirm"]
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request })
@@ -38,6 +39,9 @@ export async function updateSession(request: NextRequest) {
 
   const { pathname } = request.nextUrl
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p))
+  const isAuthCallback = AUTH_CALLBACK_PATHS.some((p) => pathname.startsWith(p))
+
+  if (isAuthCallback) return response
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone()

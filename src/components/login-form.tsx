@@ -47,6 +47,14 @@ export function LoginForm() {
           required
         />
       </div>
+      <div className="flex justify-end">
+        <Link
+          href="/esqueci-senha"
+          className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+        >
+          Esqueceu a senha?
+        </Link>
+      </div>
       <SubmitButton className="h-11 w-full" size="lg">
         Entrar
       </SubmitButton>
